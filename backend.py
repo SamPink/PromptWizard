@@ -1,42 +1,67 @@
 # backend.py
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import uvicorn
 
-from sqlalchemy import create_engine, Column, Integer, String, Text
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import Column, Integer, String, Text, create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from sqlalchemy.exc import SQLAlchemyError
+
+from pydantic import BaseModel
+
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+# CORS configuration
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    # Add other origins as needed
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Change to `origins` in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Database setup
 DATABASE_URL = "sqlite:///./prompts.db"
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine)
+# Create the SQLAlchemy engine
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False}
+)  # Needed for SQLite
+
+# Create a configured "Session" class
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Base class for declarative models
 Base = declarative_base()
 
+# SQLAlchemy ORM Model
 class Prompt(Base):
     __tablename__ = "prompts"
+
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    contents = Column(Text)
+    name = Column(String(255), nullable=False)
+    contents = Column(Text, nullable=False)
 
-Base.metadata.create_all(bind=engine)
-
-# Pydantic models
+# Pydantic Models
 class PromptCreate(BaseModel):
     name: str
     contents: str
 
 class PromptUpdate(BaseModel):
-    name: str = None
-    contents: str = None
+    name: Optional[str] = None
+    contents: Optional[str] = None
 
-class PromptOut(BaseModel):
+class PromptResponse(BaseModel):
     id: int
     name: str
     contents: str
@@ -44,59 +69,83 @@ class PromptOut(BaseModel):
     class Config:
         orm_mode = True
 
+# Create the database tables
+def create_db_and_tables():
+    Base.metadata.create_all(bind=engine)
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Initialize the database tables at startup
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
+
 # API Endpoints
-@app.get("/api/prompts", response_model=List[PromptOut])
-def get_prompts():
-    db = SessionLocal()
-    prompts = db.query(Prompt).all()
-    db.close()
-    return prompts
 
-@app.post("/api/prompts", response_model=PromptOut)
-def create_prompt(prompt: PromptCreate):
-    db = SessionLocal()
-    db_prompt = Prompt(name=prompt.name, contents=prompt.contents)
-    db.add(db_prompt)
-    db.commit()
-    db.refresh(db_prompt)
-    db.close()
-    return db_prompt
+@app.get("/api/prompts", response_model=List[PromptResponse])
+def get_prompts(db: Session = Depends(get_db)):
+    try:
+        prompts = db.query(Prompt).all()
+        return prompts
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/prompts/{prompt_id}", response_model=PromptOut)
-def update_prompt(prompt_id: int, prompt: PromptUpdate):
-    db = SessionLocal()
-    db_prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
-    if not db_prompt:
-        db.close()
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    if prompt.name is not None:
-        db_prompt.name = prompt.name
-    if prompt.contents is not None:
-        db_prompt.contents = prompt.contents
-    db.commit()
-    db.refresh(db_prompt)
-    db.close()
-    return db_prompt
+@app.post("/api/prompts", response_model=PromptResponse, status_code=201)
+def create_prompt(prompt: PromptCreate, db: Session = Depends(get_db)):
+    try:
+        db_prompt = Prompt(name=prompt.name, contents=prompt.contents)
+        db.add(db_prompt)
+        db.commit()
+        db.refresh(db_prompt)
+        return db_prompt
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/prompts/{prompt_id}")
-def delete_prompt(prompt_id: int):
-    db = SessionLocal()
-    db_prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
-    if not db_prompt:
-        db.close()
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    db.delete(db_prompt)
-    db.commit()
-    db.close()
-    return {"detail": "Prompt deleted"}
+@app.put("/api/prompts/{prompt_id}", response_model=PromptResponse)
+def update_prompt(prompt_id: int, prompt_update: PromptUpdate, db: Session = Depends(get_db)):
+    try:
+        db_prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
+        if not db_prompt:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        
+        if prompt_update.name is not None:
+            db_prompt.name = prompt_update.name
+        if prompt_update.contents is not None:
+            db_prompt.contents = prompt_update.contents
+        
+        db.commit()
+        db.refresh(db_prompt)
+        return db_prompt
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Serve static files and index.html
-app.mount("/static", StaticFiles(directory="static"), name="static")
+@app.delete("/api/prompts/{prompt_id}", status_code=204)
+def delete_prompt(prompt_id: int, db: Session = Depends(get_db)):
+    try:
+        db_prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
+        if not db_prompt:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        
+        db.delete(db_prompt)
+        db.commit()
+        return
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
+# Serve index.html
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
     return FileResponse("index.html")
 
-# Uncomment the following lines to run the app directly
-# if __name__ == "__main__":
-#     uvicorn.run("backend:app", host="0.0.0.0", port=8000, reload=True)
+# Run the app with: uvicorn backend:app --host 0.0.0.0 --port 8300 --reload
+if __name__ == "__main__":
+    uvicorn.run("backend:app", host="0.0.0.0", port=8300, reload=True)
