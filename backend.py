@@ -2,7 +2,6 @@
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from typing import List, Optional
 import uvicorn
 import logging
@@ -40,9 +39,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Mount static files
-app.mount("/tests", StaticFiles(directory="tests"), name="tests")
 
 # Database setup
 DATABASE_URL = "sqlite:///./prompts.db"
@@ -106,29 +102,11 @@ class PromptResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Create the database tables and perform migrations
+# Create the database tables
 def create_db_and_tables():
     logger.info("Creating database and tables")
-    inspector = inspect(engine)
-    
-    if not inspector.has_table("categories"):
-        Category.__table__.create(engine)
-        logger.info("Created categories table")
-    
-    if not inspector.has_table("prompts"):
-        Prompt.__table__.create(engine)
-        logger.info("Created prompts table")
-    else:
-        # Check if category_id column exists in prompts table
-        columns = inspector.get_columns("prompts")
-        if "category_id" not in [col["name"] for col in columns]:
-            # Add category_id column to prompts table
-            with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE prompts ADD COLUMN category_id INTEGER REFERENCES categories(id)"))
-                conn.commit()
-                logger.info("Added category_id column to prompts table")
-    
-    logger.info("Database and tables setup complete")
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database and tables created")
 
 # Dependency to get DB session
 def get_db():
