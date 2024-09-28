@@ -53,7 +53,7 @@
         
         <div class="flex flex-grow overflow-hidden">
             <!-- Categories Sidebar -->
-            <div class="w-1/4 bg-white p-4 rounded-lg shadow-md mr-4 overflow-y-auto custom-scrollbar">
+            <div class="w-1/4 min-w-[250px] bg-white p-4 rounded-lg shadow-md mr-4 overflow-y-auto custom-scrollbar">
                 <h2 class="text-xl font-semibold mb-4 text-gray-700">Categories</h2>
                 <ul id="categoryList" class="space-y-2">
                     <!-- Categories will be dynamically inserted here -->
@@ -62,7 +62,7 @@
             </div>
 
             <!-- Prompts and Content -->
-            <div class="flex-grow flex flex-col">
+            <div class="flex-grow flex flex-col min-w-0">
                 <div class="mb-4 flex">
                     <input type="text" id="searchInput" placeholder="Search prompts..." class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <button id="newPromptBtn" class="ml-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition duration-300">New Prompt</button>
@@ -223,7 +223,7 @@
                         <i class="fas fa-chevron-down text-gray-500"></i>
                     </div>
                 </div>
-                <ul class="prompt-list hidden">
+                <ul class="prompt-list">
                     ${promptsList}
                 </ul>
             </li>
@@ -234,7 +234,9 @@
         const promptContent = document.getElementById('promptContent');
         promptContent.innerHTML = `
             <h2 class="text-xl font-bold mb-2">${prompt.name}</h2>
-            <pre class="whitespace-pre-wrap text-sm mb-4">${prompt.contents}</pre>
+            <div class="mb-4 max-h-[calc(100vh-300px)] overflow-y-auto">
+                <pre class="whitespace-pre-wrap text-sm">${prompt.contents}</pre>
+            </div>
             <div class="flex justify-end">
                 <button id="movePromptBtn" class="mr-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition duration-300">Move</button>
                 <button id="editPromptBtn" class="mr-2 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition duration-300">Edit</button>
@@ -260,16 +262,15 @@
         categoryList.addEventListener('click', async (event) => {
             const categoryItem = event.target.closest('.category-item');
             if (categoryItem) {
-                const icon = categoryItem.querySelector('.fa-chevron-down, .fa-chevron-up');
                 const promptList = categoryItem.querySelector('.prompt-list');
                 
-                if (icon.classList.contains('fa-chevron-down')) {
-                    icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
-                    promptList.classList.remove('hidden');
-                } else {
-                    icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
-                    promptList.classList.add('hidden');
-                }
+                document.querySelectorAll('.category-item').forEach(item => {
+                    if (item !== categoryItem) {
+                        item.classList.remove('bg-blue-100');
+                    }
+                });
+
+                categoryItem.classList.toggle('bg-blue-100');
             }
 
             if (event.target.classList.contains('delete-category')) {
@@ -285,8 +286,8 @@
                 const prompts = await fetchPrompts(categoryId);
                 currentPrompt = prompts.find(p => p.id === id);
                 displayPromptContent(currentPrompt);
-                document.querySelectorAll('.prompt-item').forEach(item => item.classList.remove('bg-blue-100'));
-                promptItem.classList.add('bg-blue-100');
+                document.querySelectorAll('.prompt-item').forEach(item => item.classList.remove('bg-blue-200'));
+                promptItem.classList.add('bg-blue-200');
             }
         });
 
@@ -309,13 +310,11 @@
         promptItems.forEach(item => {
             const text = item.textContent.toLowerCase();
             const categoryItem = item.closest('.category-item');
-            const icon = categoryItem.querySelector('.fa-chevron-down, .fa-chevron-up');
             const promptList = categoryItem.querySelector('.prompt-list');
             
             if (text.includes(filter)) {
                 item.style.display = '';
                 categoryItem.style.display = '';
-                icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
                 promptList.classList.remove('hidden');
             } else {
                 item.style.display = 'none';
@@ -458,13 +457,6 @@
                         newPromptItem.textContent = updatedPrompt.name;
                         promptList.appendChild(newPromptItem);
                     }
-
-                    // Ensure the category is expanded
-                    const icon = newCategoryItem.querySelector('.fa-chevron-down, .fa-chevron-up');
-                    if (icon.classList.contains('fa-chevron-down')) {
-                        icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
-                        promptList.classList.remove('hidden');
-                    }
                 }
 
                 // Update the current prompt
@@ -522,13 +514,6 @@
             }
         });
     });
-    </script>
-
-    <!-- Include the console tests script -->
-    <script src="/tests/console_tests.js"></script>
-    <script>
-        // Make runTests function globally available
-        window.runTests = runTests;
     </script>
 </body>
 </html>
