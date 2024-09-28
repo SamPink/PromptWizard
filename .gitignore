@@ -1,0 +1,5 @@
+prompts.db
+__pycache__/
+*.pyc
+tests/
+tests/console_tests.js
